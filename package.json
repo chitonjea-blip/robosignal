@@ -1,0 +1,17 @@
+{
+  "name": "robosignal-server",
+  "version": "1.0.0",
+  "description": "RoboSignal Pro — Capital.com auto-trading bridge",
+  "main": "robosignal-server.js",
+  "scripts": {
+    "start": "node robosignal-server.js",
+    "dev": "node --watch robosignal-server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.18.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
