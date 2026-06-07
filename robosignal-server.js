@@ -30,6 +30,12 @@ CFG.baseUrl = CFG.demo
   ? 'https://demo-api-capital.backend.capitalinterface.com'
   : 'https://api-capital.backend.capitalinterface.com';
 
+// Fallback URLs to try if primary fails
+CFG.fallbackUrls = CFG.demo
+  ? ['https://demo-api-capital.backend.capitalinterface.com',
+     'https://api-capital.backend.capitalinterface.com']
+  : ['https://api-capital.backend.capitalinterface.com'];
+
 console.log(`Mode: ${CFG.demo ? 'DEMO' : '*** LIVE ***'} | Threshold: ${CFG.threshold}/5 | Base: ${CFG.baseUrl}`);
 
 // ── Session management ────────────────────────────────────────
@@ -42,34 +48,39 @@ async function authenticate() {
     throw new Error('CAPITAL_EMAIL and CAPITAL_PASSWORD env vars not set');
   }
 
-  console.log(`[${ts()}] Authenticating with Capital.com at ${CFG.baseUrl}`);
-  console.log(`[${ts()}] Email: ${CFG.email.slice(0,3)}***  Key: ${CFG.apiKey.slice(0,4)}***`);
+  let lastError;
+  for (const baseUrl of CFG.fallbackUrls) {
+    console.log(`[${ts()}] Trying Capital.com at ${baseUrl}`);
+    console.log(`[${ts()}] Email: ${CFG.email.slice(0,3)}***  Key: ${CFG.apiKey.slice(0,4)}***`);
+    try {
+      const res = await fetch(`${baseUrl}/api/v1/session`, {
+        method  : 'POST',
+        headers : { 'X-CAP-API-KEY': CFG.apiKey, 'Content-Type': 'application/json' },
+        body    : JSON.stringify({ identifier: CFG.email, password: CFG.password }),
+        signal  : AbortSignal.timeout(10000),
+      });
 
-  let res;
-  try {
-    res = await fetch(`${CFG.baseUrl}/api/v1/session`, {
-      method  : 'POST',
-      headers : { 'X-CAP-API-KEY': CFG.apiKey, 'Content-Type': 'application/json' },
-      body    : JSON.stringify({ identifier: CFG.email, password: CFG.password }),
-      signal  : AbortSignal.timeout(10000),
-    });
-  } catch (fetchErr) {
-    console.error(`[${ts()}] Network error reaching Capital.com: ${fetchErr.message}`);
-    throw new Error(`Cannot reach Capital.com: ${fetchErr.message}`);
+      console.log(`[${ts()}] Capital.com responded with status: ${res.status}`);
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        console.error(`[${ts()}] Auth rejected: ${JSON.stringify(err)}`);
+        throw new Error(`Auth failed ${res.status}: ${err.errorCode || res.statusText}`);
+      }
+
+      session.cst       = res.headers.get('CST');
+      session.token     = res.headers.get('X-SECURITY-TOKEN');
+      session.expiresAt = Date.now() + 9 * 60 * 1000;
+      CFG.baseUrl       = baseUrl; // lock in the working URL
+      console.log(`[${ts()}] Session OK — CST: ${session.cst?.slice(0,8)}*** — using ${baseUrl}`);
+      return;
+
+    } catch (e) {
+      console.error(`[${ts()}] Failed with ${baseUrl}: ${e.message}`);
+      lastError = e;
+    }
   }
-
-  console.log(`[${ts()}] Capital.com responded with status: ${res.status}`);
-
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    console.error(`[${ts()}] Auth rejected: ${JSON.stringify(err)}`);
-    throw new Error(`Auth failed ${res.status}: ${err.errorCode || res.statusText}`);
-  }
-
-  session.cst      = res.headers.get('CST');
-  session.token    = res.headers.get('X-SECURITY-TOKEN');
-  session.expiresAt = Date.now() + 9 * 60 * 1000;
-  console.log(`[${ts()}] Session OK — CST: ${session.cst?.slice(0,8)}***`);
+  throw new Error(`Cannot reach Capital.com: ${lastError?.message}`);
 }
 
 async function api(method, path, body) {
